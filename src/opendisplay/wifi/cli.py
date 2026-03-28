@@ -26,19 +26,9 @@ def image_to_1bpp(img: Image.Image, width: int, height: int) -> bytes:
     img = img.convert("L")
     img = ImageOps.pad(img, (width, height), Image.Resampling.LANCZOS, color=255)
     img = img.convert("1")  # Floyd-Steinberg dither
-
-    bytes_per_row = (width + 7) // 8
-    output = bytearray(bytes_per_row * height)
-
-    pixels = img.load()
-    for y in range(height):
-        for x in range(width):
-            if pixels[x, y]:
-                byte_idx = y * bytes_per_row + x // 8
-                bit_idx = 7 - (x % 8)
-                output[byte_idx] |= 1 << bit_idx
-
-    return bytes(output)
+    # PIL raw "1" encoding: packed bits, MSB first, row-padded to byte boundary
+    # 0=black, 1=white — matches OpenDisplay monochrome format
+    return img.tobytes("raw", "1")
 
 
 def generate_checkerboard(width: int, height: int, cell_size: int = 8) -> bytes:

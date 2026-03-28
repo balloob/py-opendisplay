@@ -22,17 +22,29 @@ PKT_NEW_IMAGE = 0x82
 PKT_REQUEST_CONFIG = 0x83
 
 
-def crc16_ccitt(data: bytes) -> int:
-    """CRC16-CCITT: poly 0x1021, init 0xFFFF, no reflection."""
-    crc = 0xFFFF
-    for byte in data:
-        crc ^= byte << 8
+def _make_crc_table() -> list[int]:
+    table = []
+    for i in range(256):
+        crc = i << 8
         for _ in range(8):
             if crc & 0x8000:
                 crc = (crc << 1) ^ 0x1021
             else:
                 crc <<= 1
             crc &= 0xFFFF
+        table.append(crc)
+    return table
+
+
+_CRC_TABLE = _make_crc_table()
+
+
+def crc16_ccitt(data: bytes) -> int:
+    """CRC16-CCITT: poly 0x1021, init 0xFFFF, no reflection."""
+    crc = 0xFFFF
+    table = _CRC_TABLE
+    for byte in data:
+        crc = table[((crc >> 8) ^ byte) & 0xFF] ^ ((crc << 8) & 0xFFFF)
     return crc
 
 
