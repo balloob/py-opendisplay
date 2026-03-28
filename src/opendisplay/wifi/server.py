@@ -106,6 +106,10 @@ class OpenDisplayServer:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self._clients.append(task)
+
         addr = writer.get_extra_info("peername")
         _LOGGER.info("Client connected: %s", addr)
 
@@ -141,14 +145,23 @@ class OpenDisplayServer:
                     image = await loop.run_in_executor(None, self._get_image)
 
                     if image is not None:
-                        _LOGGER.info("Sending image to %s (%d bytes)", addr, len(image))
-                        writer.write(
-                            build_new_image(image, self.poll_interval, self.refresh_type)
+                        frame = await loop.run_in_executor(
+                            None, build_new_image, image, self.poll_interval, self.refresh_type
                         )
+                        _LOGGER.info("Sending image to %s (%d bytes)", addr, len(image))
+                        # Write in chunks so cancellation can interrupt
+                        mv = memoryview(frame)
+                        offset = 0
+                        chunk_size = 64 * 1024
+                        while offset < len(frame):
+                            end = min(offset + chunk_size, len(frame))
+                            writer.write(mv[offset:end])
+                            await writer.drain()
+                            offset = end
                     else:
                         _LOGGER.info("No image for %s", addr)
                         writer.write(build_no_image(self.poll_interval))
-                    await writer.drain()
+                        await writer.drain()
 
                 elif parsed.packet_id == PKT_DISPLAY_ANNOUNCEMENT:
                     self.last_announcement = parsed
@@ -165,6 +178,8 @@ class OpenDisplayServer:
         except Exception:
             _LOGGER.exception("Error handling client %s", addr)
         finally:
+            if task is not None and task in self._clients:
+                self._clients.remove(task)
             writer.close()
             try:
                 await writer.wait_closed()
