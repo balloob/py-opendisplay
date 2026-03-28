@@ -137,7 +137,8 @@ class OpenDisplayServer:
                         config_received = True
                         continue
 
-                    image = self._get_image()
+                    loop = asyncio.get_running_loop()
+                    image = await loop.run_in_executor(None, self._get_image)
 
                     if image is not None:
                         _LOGGER.info("Sending image to %s (%d bytes)", addr, len(image))
