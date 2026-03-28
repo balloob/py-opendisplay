@@ -1,31 +1,29 @@
-"""Image encoding utilities for OpenDisplay devices.
-
-Provides functions to convert PIL images to 1bpp monochrome format
-and generate test patterns.
-"""
+"""Image encoding utilities for OpenDisplay WiFi server."""
 
 from __future__ import annotations
 
-from PIL import Image, ImageDraw, ImageOps
+from epaper_dithering import MONO_4_26, DitherMode, dither_image
+from PIL import Image, ImageDraw
+
+from ..encoding.images import fit_image
+from ..models.enums import FitMode
 
 
-def image_to_1bpp(img: Image.Image, width: int, height: int) -> bytes:
+def image_to_1bpp(
+    img: Image.Image,
+    width: int,
+    height: int,
+    dither_mode: DitherMode = DitherMode.FLOYD_STEINBERG,
+) -> bytes:
     """Fit, dither, and encode a PIL Image as OpenDisplay 1bpp."""
-    img = img.convert("L")
-    img = ImageOps.pad(img, (width, height), Image.Resampling.LANCZOS, color=255)
-    img = img.convert("1")  # Floyd-Steinberg dither
-    # PIL raw "1" encoding: packed bits, MSB first, row-padded to byte boundary
-    # 0=black, 1=white -- matches OpenDisplay monochrome format
-    return img.tobytes("raw", "1")
+    fitted = fit_image(img, (width, height), FitMode.CONTAIN)
+    dithered = dither_image(fitted, MONO_4_26, mode=dither_mode)
+    # Convert palette image to 1-bit and pack with PIL (fast C code)
+    return dithered.convert("1").tobytes("raw", "1")
 
 
 def generate_checkerboard(width: int, height: int, cell_size: int = 8) -> bytes:
-    """Generate a 1bpp monochrome checkerboard pattern.
-
-    Uses PIL for efficient rendering instead of per-pixel Python loops.
-    White cells are 1-bits, black cells are 0-bits, MSB first, rows padded
-    to byte boundaries -- matching the OpenDisplay monochrome format.
-    """
+    """Generate a 1bpp monochrome checkerboard pattern."""
     img = Image.new("1", (width, height), 0)
     draw = ImageDraw.Draw(img)
 
