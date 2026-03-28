@@ -37,17 +37,17 @@ class MdnsAdvertiser:
         ip = self.advertise_ip or _get_local_ip()
 
         if ip:
-            addresses = [socket.inet_aton(ip)]
+            parsed_addresses = [ip]
             interfaces = [ip]
         else:
-            addresses = []
+            parsed_addresses = []
             interfaces = InterfaceChoice.Default
 
         hostname = socket.gethostname()
         self._info = AsyncServiceInfo(
             f"{SERVICE_TYPE}.local.",
             f"OpenDisplay Server ({hostname}).{SERVICE_TYPE}.local.",
-            addresses=addresses,
+            parsed_addresses=parsed_addresses,
             port=self.port,
             properties={"ip": ip} if ip else {},
         )
