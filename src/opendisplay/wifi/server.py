@@ -110,7 +110,8 @@ class OpenDisplayServer:
         if task is not None:
             self._clients.append(task)
 
-        addr = writer.get_extra_info("peername")
+        peer = writer.get_extra_info("peername")
+        addr = peer[0] if peer else "unknown"
         _LOGGER.info("Client connected: %s", addr)
 
         config_received = not self.request_config_first
