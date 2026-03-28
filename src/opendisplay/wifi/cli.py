@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import signal
 
 from PIL import Image, ImageOps
 
@@ -101,12 +102,13 @@ async def async_main(args: argparse.Namespace) -> None:
         server.actual_port,
     )
 
-    try:
-        await asyncio.Event().wait()
-    except asyncio.CancelledError:
-        pass
-    finally:
-        await server.stop()
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGINT, stop_event.set)
+    loop.add_signal_handler(signal.SIGTERM, stop_event.set)
+
+    await stop_event.wait()
+    await server.stop()
 
 
 def main() -> None:
@@ -131,7 +133,5 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    try:
-        asyncio.run(async_main(args))
-    except KeyboardInterrupt:
-        print("\nStopped.")
+    asyncio.run(async_main(args))
+    print("Stopped.")
