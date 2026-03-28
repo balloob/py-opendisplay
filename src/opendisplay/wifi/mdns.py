@@ -34,13 +34,12 @@ class MdnsAdvertiser:
 
     async def start(self) -> None:
         """Start advertising via zeroconf."""
-        ip = self.advertise_ip or _get_local_ip()
-
-        if ip:
-            parsed_addresses = [ip]
-            interfaces = [ip]
+        if self.advertise_ip:
+            parsed_addresses = [self.advertise_ip]
+            interfaces = [self.advertise_ip]
         else:
-            parsed_addresses = []
+            local_ip = _get_local_ip()
+            parsed_addresses = [local_ip] if local_ip else []
             interfaces = InterfaceChoice.Default
 
         hostname = socket.gethostname()
@@ -49,7 +48,7 @@ class MdnsAdvertiser:
             f"OpenDisplay Server ({hostname}).{SERVICE_TYPE}.local.",
             parsed_addresses=parsed_addresses,
             port=self.port,
-            properties={"ip": ip} if ip else {},
+            properties={"ip": parsed_addresses[0]} if parsed_addresses else {},
         )
 
         self._zeroconf = AsyncZeroconf(
@@ -58,7 +57,10 @@ class MdnsAdvertiser:
         )
         await self._zeroconf.async_register_service(self._info)
         _LOGGER.info(
-            "mDNS: advertised %s on %s:%d", SERVICE_TYPE, ip or "all interfaces", self.port,
+            "mDNS: advertised %s on %s:%d",
+            SERVICE_TYPE,
+            self.advertise_ip or "all interfaces",
+            self.port,
         )
 
     async def stop(self) -> None:
