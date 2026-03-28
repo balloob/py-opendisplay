@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import struct
 
 import pytest
@@ -223,3 +224,31 @@ async def test_multiple_clients() -> None:
         results = await asyncio.gather(client_session(), client_session(), client_session())
         for result in results:
             assert result == image_data
+
+
+@pytest.mark.asyncio
+async def test_write_frame_logs_warning_on_broken_pipe(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Broken pipe during a response write should not emit a stack trace."""
+
+    class FailingWriter:
+        def write(self, data: bytes) -> None:
+            pass
+
+        async def drain(self) -> None:
+            raise BrokenPipeError(32, "Broken pipe")
+
+    server = OpenDisplayServer(mdns=False)
+    caplog.set_level(logging.WARNING)
+
+    result = await server._write_frame(
+        FailingWriter(),
+        b"\x00" * 4,
+        "192.168.1.25",
+        "sending image",
+    )
+
+    assert result is False
+    assert "Client 192.168.1.25 disconnected while sending image" in caplog.text
+    assert "Traceback" not in caplog.text

@@ -138,8 +138,13 @@ class OpenDisplayServer:
 
                     if not config_received:
                         _LOGGER.info("Requesting config from %s", addr)
-                        writer.write(build_request_config())
-                        await writer.drain()
+                        if not await self._write_frame(
+                            writer,
+                            build_request_config(),
+                            addr,
+                            "sending config request",
+                        ):
+                            break
                         config_received = True
                         continue
 
@@ -159,19 +164,22 @@ class OpenDisplayServer:
                             None, build_new_image, image, self.poll_interval, self.refresh_type
                         )
                         _LOGGER.info("Sending image to %s (%d bytes)", addr, len(image))
-                        # Write in chunks so cancellation can interrupt
-                        mv = memoryview(frame)
-                        offset = 0
-                        chunk_size = 64 * 1024
-                        while offset < len(frame):
-                            end = min(offset + chunk_size, len(frame))
-                            writer.write(mv[offset:end])
-                            await writer.drain()
-                            offset = end
+                        if not await self._write_frame(
+                            writer,
+                            frame,
+                            addr,
+                            "sending image",
+                        ):
+                            break
                     else:
                         _LOGGER.info("No image for %s", addr)
-                        writer.write(build_no_image(self.poll_interval))
-                        await writer.drain()
+                        if not await self._write_frame(
+                            writer,
+                            build_no_image(self.poll_interval),
+                            addr,
+                            "sending no-image response",
+                        ):
+                            break
 
                 elif isinstance(parsed, DisplayAnnouncement):
                     self.last_announcement = parsed
@@ -195,6 +203,30 @@ class OpenDisplayServer:
                 await writer.wait_closed()
             except Exception:
                 pass
+
+    async def _write_frame(
+        self,
+        writer: asyncio.StreamWriter,
+        frame: bytes,
+        addr: str,
+        action: str,
+    ) -> bool:
+        """Write a full response frame, downgrading expected disconnects to warnings."""
+        try:
+            # Write in chunks so cancellation can interrupt long sends.
+            mv = memoryview(frame)
+            offset = 0
+            chunk_size = 64 * 1024
+            while offset < len(frame):
+                end = min(offset + chunk_size, len(frame))
+                writer.write(mv[offset:end])
+                await writer.drain()
+                offset = end
+        except ConnectionError as err:
+            _LOGGER.warning("Client %s disconnected while %s: %s", addr, action, err)
+            return False
+
+        return True
 
     async def _read_frame(self, reader: asyncio.StreamReader) -> bytes | None:
         try:
