@@ -7,6 +7,7 @@ Advertises via mDNS so displays can discover the server automatically.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import struct
 from typing import Callable
@@ -114,6 +115,7 @@ class OpenDisplayServer:
         _LOGGER.info("Client connected: %s", addr)
 
         config_received = not self.request_config_first
+        last_sent_hash: str | None = None
 
         try:
             while True:
@@ -143,6 +145,14 @@ class OpenDisplayServer:
 
                     loop = asyncio.get_running_loop()
                     image = await loop.run_in_executor(None, self._get_image)
+
+                    # Skip if we already sent this exact image on this connection
+                    if image is not None:
+                        image_hash = hashlib.sha256(image).hexdigest()[:16]
+                        if image_hash == last_sent_hash:
+                            image = None
+                        else:
+                            last_sent_hash = image_hash
 
                     if image is not None:
                         frame = await loop.run_in_executor(

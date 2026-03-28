@@ -55,14 +55,12 @@ def _make_image_provider(
 ) -> callable:
     """Create an image_provider.
 
-    For local files: converts once per resolution, returns None on subsequent calls.
-    For URLs: fetches each time, hashes the raw download, only converts and returns
-    when the image has changed since last send.
+    For local files: converts once per resolution, caches the result.
+    For URLs: fetches each time, re-converts if pixels changed.
+    The server handles deduplication per connection via hashing.
     """
-    # Tracks last sent image hash per resolution
-    last_hash: dict[tuple[int, int], str] = {}
-    # Cache of encoded image data per (resolution, source_hash)
-    cache: dict[tuple[tuple[int, int], str], bytes] = {}
+    cache: dict[tuple[int, int], bytes] = {}
+    url_pixel_hash: dict[tuple[int, int], str] = {}
 
     def provider(announcement: ParsedFrame | None) -> bytes | None:
         if announcement is None:
@@ -73,50 +71,45 @@ def _make_image_provider(
         key = (width, height)
 
         if checkerboard:
-            if key in last_hash:
-                return None
-            data = generate_checkerboard(width, height)
-            last_hash[key] = "checkerboard"
-            logging.info("Generated %dx%d checkerboard: %d bytes", width, height, len(data))
-            return data
+            if key not in cache:
+                cache[key] = generate_checkerboard(width, height)
+                logging.info("Generated %dx%d checkerboard: %d bytes", width, height, len(cache[key]))
+            return cache[key]
 
         if source is None:
             return None
 
         if _is_url(source):
-            # Fetch from URL each time
             logging.info("Fetching %s", source)
             try:
                 raw = urlopen(source).read()
             except Exception:
                 logging.exception("Failed to fetch %s", source)
-                return None
+                # Return cached version if available
+                return cache.get(key)
 
-            # Hash decoded pixels, not raw bytes (PNG encoding can vary)
+            # Hash decoded pixels to detect changes (PNG encoding can vary)
             img = Image.open(io.BytesIO(raw))
             pixel_hash = hashlib.sha256(img.tobytes()).hexdigest()[:16]
 
-            if last_hash.get(key) == pixel_hash:
+            if url_pixel_hash.get(key) == pixel_hash:
                 logging.info("Image unchanged (hash %s)", pixel_hash)
-                return None
+                return cache.get(key)
 
             logging.info("New image (hash %s), converting to %dx%d 1bpp...", pixel_hash, width, height)
             data = image_to_1bpp(img, width, height)
-            last_hash[key] = pixel_hash
+            cache[key] = data
+            url_pixel_hash[key] = pixel_hash
             logging.info("Image encoded: %d bytes", len(data))
             return data
 
         else:
-            # Local file: convert once
-            if key in last_hash:
-                return None
-
-            logging.info("Converting %s to %dx%d 1bpp...", source, width, height)
-            img = Image.open(source)
-            data = image_to_1bpp(img, width, height)
-            last_hash[key] = "file"
-            logging.info("Image encoded: %d bytes", len(data))
-            return data
+            if key not in cache:
+                logging.info("Converting %s to %dx%d 1bpp...", source, width, height)
+                img = Image.open(source)
+                cache[key] = image_to_1bpp(img, width, height)
+                logging.info("Image encoded: %d bytes", len(cache[key]))
+            return cache[key]
 
     return provider
 
