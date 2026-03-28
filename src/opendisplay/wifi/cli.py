@@ -127,10 +127,7 @@ async def async_main(args: argparse.Namespace) -> None:
     )
 
     await server.start()
-    logging.info(
-        "Serving on port %d. Waiting for display to connect and announce its resolution...",
-        server.actual_port,
-    )
+    logging.info("Serving on port %d", server.actual_port)
 
     try:
         while True:
