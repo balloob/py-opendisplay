@@ -59,8 +59,7 @@ def generate_checkerboard(width: int, height: int, cell_size: int = 8) -> bytes:
 def _make_image_provider(
     image_path: str | None, checkerboard: bool
 ) -> callable:
-    """Create an image_provider that sends the image once, then returns None."""
-    sent: set[tuple[int, int]] = set()
+    """Create an image_provider that converts using the display's announced dimensions."""
     cache: dict[tuple[int, int], bytes] = {}
 
     def provider(announcement: ParsedFrame | None) -> bytes | None:
@@ -71,9 +70,6 @@ def _make_image_provider(
         height = announcement.height
         key = (width, height)
 
-        if key in sent:
-            return None
-
         if key not in cache:
             if image_path:
                 cache[key] = png_to_1bpp(image_path, width, height)
@@ -82,7 +78,6 @@ def _make_image_provider(
             else:
                 return None
 
-        sent.add(key)
         return cache[key]
 
     return provider
