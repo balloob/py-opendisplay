@@ -42,10 +42,11 @@ class MdnsAdvertiser:
             parsed_addresses = [local_ip] if local_ip else []
             interfaces = InterfaceChoice.Default
 
-        hostname = socket.gethostname()
+        hostname = socket.gethostname().split(".")[0]
         self._info = AsyncServiceInfo(
-            f"{SERVICE_TYPE}.local.",
-            f"OpenDisplay Server ({hostname}).{SERVICE_TYPE}.local.",
+            type_=f"{SERVICE_TYPE}.local.",
+            name=f"OpenDisplay ({hostname}).{SERVICE_TYPE}.local.",
+            server=f"{hostname}.local.",
             parsed_addresses=parsed_addresses,
             port=self.port,
             properties={"ip": parsed_addresses[0]} if parsed_addresses else {},
