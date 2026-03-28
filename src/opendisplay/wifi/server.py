@@ -110,7 +110,6 @@ class OpenDisplayServer:
         _LOGGER.info("Client connected: %s", addr)
 
         config_received = not self.request_config_first
-        image_sent = False
 
         try:
             while True:
@@ -138,10 +137,9 @@ class OpenDisplayServer:
                         config_received = True
                         continue
 
-                    image = None if image_sent else self._get_image()
+                    image = self._get_image()
 
                     if image is not None:
-                        image_sent = True
                         _LOGGER.info("Sending image to %s (%d bytes)", addr, len(image))
                         writer.write(
                             build_new_image(image, self.poll_interval, self.refresh_type)

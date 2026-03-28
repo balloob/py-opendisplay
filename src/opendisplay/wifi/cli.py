@@ -2,6 +2,7 @@
 
 Usage:
     opendisplay-serve image.png
+    opendisplay-serve https://example.com/dashboard.png
     opendisplay-serve --checkerboard
 """
 
@@ -9,8 +10,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
+import io
 import logging
 import signal
+from urllib.request import urlopen
 
 from PIL import Image, ImageOps
 
@@ -18,10 +22,9 @@ from .protocol import DEFAULT_PORT, ParsedFrame
 from .server import OpenDisplayServer
 
 
-def png_to_1bpp(image_path: str, width: int, height: int) -> bytes:
-    """Load an image, fit to display, dither to 1-bit, encode as OpenDisplay 1bpp."""
-    logging.info("Converting %s to %dx%d 1bpp...", image_path, width, height)
-    img = Image.open(image_path).convert("L")
+def image_to_1bpp(img: Image.Image, width: int, height: int) -> bytes:
+    """Fit, dither, and encode a PIL Image as OpenDisplay 1bpp."""
+    img = img.convert("L")
     img = ImageOps.pad(img, (width, height), Image.Resampling.LANCZOS, color=255)
     img = img.convert("1")  # Floyd-Steinberg dither
 
@@ -36,13 +39,11 @@ def png_to_1bpp(image_path: str, width: int, height: int) -> bytes:
                 bit_idx = 7 - (x % 8)
                 output[byte_idx] |= 1 << bit_idx
 
-    logging.info("Image encoded: %d bytes", len(output))
     return bytes(output)
 
 
 def generate_checkerboard(width: int, height: int, cell_size: int = 8) -> bytes:
     """Generate a 1bpp monochrome checkerboard pattern."""
-    logging.info("Generating %dx%d checkerboard...", width, height)
     bytes_per_row = (width + 7) // 8
     output = bytearray(bytes_per_row * height)
 
@@ -53,15 +54,26 @@ def generate_checkerboard(width: int, height: int, cell_size: int = 8) -> bytes:
                 bit_idx = 7 - (x % 8)
                 output[byte_idx] |= 1 << bit_idx
 
-    logging.info("Image encoded: %d bytes", len(output))
     return bytes(output)
 
 
+def _is_url(source: str) -> bool:
+    return source.startswith("http://") or source.startswith("https://")
+
+
 def _make_image_provider(
-    image_path: str | None, checkerboard: bool
+    source: str | None, checkerboard: bool
 ) -> callable:
-    """Create an image_provider that converts using the display's announced dimensions."""
-    cache: dict[tuple[int, int], bytes] = {}
+    """Create an image_provider.
+
+    For local files: converts once per resolution, returns None on subsequent calls.
+    For URLs: fetches each time, hashes the raw download, only converts and returns
+    when the image has changed since last send.
+    """
+    # Tracks last sent image hash per resolution
+    last_hash: dict[tuple[int, int], str] = {}
+    # Cache of encoded image data per (resolution, source_hash)
+    cache: dict[tuple[tuple[int, int], str], bytes] = {}
 
     def provider(announcement: ParsedFrame | None) -> bytes | None:
         if announcement is None:
@@ -71,22 +83,57 @@ def _make_image_provider(
         height = announcement.height
         key = (width, height)
 
-        if key not in cache:
-            if image_path:
-                cache[key] = png_to_1bpp(image_path, width, height)
-            elif checkerboard:
-                cache[key] = generate_checkerboard(width, height)
-            else:
+        if checkerboard:
+            if key in last_hash:
+                return None
+            data = generate_checkerboard(width, height)
+            last_hash[key] = "checkerboard"
+            logging.info("Generated %dx%d checkerboard: %d bytes", width, height, len(data))
+            return data
+
+        if source is None:
+            return None
+
+        if _is_url(source):
+            # Fetch from URL each time
+            logging.info("Fetching %s", source)
+            try:
+                raw = urlopen(source).read()
+            except Exception:
+                logging.exception("Failed to fetch %s", source)
                 return None
 
-        return cache[key]
+            source_hash = hashlib.sha256(raw).hexdigest()[:16]
+
+            if last_hash.get(key) == source_hash:
+                logging.debug("Image unchanged (hash %s)", source_hash)
+                return None
+
+            logging.info("New image (hash %s), converting to %dx%d 1bpp...", source_hash, width, height)
+            img = Image.open(io.BytesIO(raw))
+            data = image_to_1bpp(img, width, height)
+            last_hash[key] = source_hash
+            logging.info("Image encoded: %d bytes", len(data))
+            return data
+
+        else:
+            # Local file: convert once
+            if key in last_hash:
+                return None
+
+            logging.info("Converting %s to %dx%d 1bpp...", source, width, height)
+            img = Image.open(source)
+            data = image_to_1bpp(img, width, height)
+            last_hash[key] = "file"
+            logging.info("Image encoded: %d bytes", len(data))
+            return data
 
     return provider
 
 
 async def async_main(args: argparse.Namespace) -> None:
     """Async entry point."""
-    provider = _make_image_provider(args.image, args.checkerboard)
+    provider = _make_image_provider(args.source, args.checkerboard)
 
     server = OpenDisplayServer(
         port=args.port,
@@ -116,7 +163,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Serve images to OpenDisplay devices over WiFi"
     )
-    parser.add_argument("image", nargs="?", help="Path to image file (PNG, JPG, etc.)")
+    parser.add_argument("source", nargs="?", help="Image file path or URL (http/https)")
     parser.add_argument("--advertise-ip", default=None, help="IP to advertise via mDNS (auto-detected if omitted)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="TCP port (default: %(default)s)")
     parser.add_argument("--poll-interval", type=int, default=300, help="Seconds between polls (default: 300)")
@@ -125,8 +172,8 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
-    if not args.image and not args.checkerboard:
-        parser.error("Provide an image path or use --checkerboard")
+    if not args.source and not args.checkerboard:
+        parser.error("Provide an image path/URL or use --checkerboard")
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
