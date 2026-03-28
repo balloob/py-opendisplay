@@ -15,35 +15,11 @@ import io
 import logging
 from urllib.request import urlopen
 
-from PIL import Image, ImageOps
+from PIL import Image
 
-from .protocol import DEFAULT_PORT, ParsedFrame
+from .imaging import generate_checkerboard, image_to_1bpp
+from .protocol import DEFAULT_PORT, DisplayAnnouncement
 from .server import OpenDisplayServer
-
-
-def image_to_1bpp(img: Image.Image, width: int, height: int) -> bytes:
-    """Fit, dither, and encode a PIL Image as OpenDisplay 1bpp."""
-    img = img.convert("L")
-    img = ImageOps.pad(img, (width, height), Image.Resampling.LANCZOS, color=255)
-    img = img.convert("1")  # Floyd-Steinberg dither
-    # PIL raw "1" encoding: packed bits, MSB first, row-padded to byte boundary
-    # 0=black, 1=white — matches OpenDisplay monochrome format
-    return img.tobytes("raw", "1")
-
-
-def generate_checkerboard(width: int, height: int, cell_size: int = 8) -> bytes:
-    """Generate a 1bpp monochrome checkerboard pattern."""
-    bytes_per_row = (width + 7) // 8
-    output = bytearray(bytes_per_row * height)
-
-    for y in range(height):
-        for x in range(width):
-            if ((x // cell_size) + (y // cell_size)) % 2 == 1:
-                byte_idx = y * bytes_per_row + x // 8
-                bit_idx = 7 - (x % 8)
-                output[byte_idx] |= 1 << bit_idx
-
-    return bytes(output)
 
 
 def _is_url(source: str) -> bool:
@@ -62,7 +38,7 @@ def _make_image_provider(
     cache: dict[tuple[int, int], bytes] = {}
     url_pixel_hash: dict[tuple[int, int], str] = {}
 
-    def provider(announcement: ParsedFrame | None) -> bytes | None:
+    def provider(announcement: DisplayAnnouncement | None) -> bytes | None:
         if announcement is None:
             return None
 
@@ -82,7 +58,7 @@ def _make_image_provider(
         if _is_url(source):
             logging.info("Fetching %s", source)
             try:
-                raw = urlopen(source).read()
+                raw = urlopen(source, timeout=30).read()
             except Exception:
                 logging.exception("Failed to fetch %s", source)
                 # Return cached version if available

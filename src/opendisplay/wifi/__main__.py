@@ -11,27 +11,9 @@ import asyncio
 import logging
 import sys
 
+from .imaging import generate_checkerboard
 from .protocol import DEFAULT_PORT
 from .server import OpenDisplayServer
-
-
-def generate_checkerboard(width: int, height: int, cell_size: int = 8) -> bytes:
-    """Generate a 1bpp monochrome checkerboard pattern."""
-    bytes_per_row = (width + 7) // 8
-    output = bytearray(bytes_per_row * height)
-
-    for y in range(height):
-        for x in range(width):
-            cell_x = x // cell_size
-            cell_y = y // cell_size
-            is_white = (cell_x + cell_y) % 2 == 1
-
-            if is_white:
-                byte_idx = y * bytes_per_row + x // 8
-                bit_idx = 7 - (x % 8)
-                output[byte_idx] |= 1 << bit_idx
-
-    return bytes(output)
 
 
 async def main() -> None:

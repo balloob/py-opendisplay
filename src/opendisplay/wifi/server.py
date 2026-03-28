@@ -14,9 +14,8 @@ from typing import Callable
 
 from .mdns import MdnsAdvertiser
 from .protocol import (
-    PKT_DISPLAY_ANNOUNCEMENT,
-    PKT_IMAGE_REQUEST,
-    ParsedFrame,
+    DisplayAnnouncement,
+    ImageRequest,
     build_new_image,
     build_no_image,
     build_request_config,
@@ -44,7 +43,7 @@ class OpenDisplayServer:
         poll_interval: int = 60,
         refresh_type: int = 0x00,
         request_config_first: bool = True,
-        image_provider: Callable[[ParsedFrame | None], bytes | None] | None = None,
+        image_provider: Callable[[DisplayAnnouncement | None], bytes | None] | None = None,
         mdns: bool = True,
         advertise_ip: str | None = None,
     ) -> None:
@@ -60,8 +59,8 @@ class OpenDisplayServer:
         self._server: asyncio.AbstractServer | None = None
         self._clients: list[asyncio.Task] = []
         self._mdns: MdnsAdvertiser | None = None
-        self.last_announcement: ParsedFrame | None = None
-        self.last_image_request: ParsedFrame | None = None
+        self.last_announcement: DisplayAnnouncement | None = None
+        self.last_image_request: ImageRequest | None = None
 
     @property
     def actual_port(self) -> int:
@@ -129,7 +128,7 @@ class OpenDisplayServer:
                     _LOGGER.warning("Invalid frame from %s, ignoring", addr)
                     continue
 
-                if parsed.packet_id == PKT_IMAGE_REQUEST:
+                if isinstance(parsed, ImageRequest):
                     self.last_image_request = parsed
                     _LOGGER.info(
                         "Image request from %s (battery=%d, rssi=%d)",
@@ -173,7 +172,7 @@ class OpenDisplayServer:
                         writer.write(build_no_image(self.poll_interval))
                         await writer.drain()
 
-                elif parsed.packet_id == PKT_DISPLAY_ANNOUNCEMENT:
+                elif isinstance(parsed, DisplayAnnouncement):
                     self.last_announcement = parsed
                     _LOGGER.info(
                         "Announcement from %s: %dx%d scheme=%d",

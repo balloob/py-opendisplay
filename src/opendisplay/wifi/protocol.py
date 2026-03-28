@@ -94,19 +94,23 @@ def build_new_image(
     return build_frame(single)
 
 
-# Frame parsing
+# Parsed frame types -- one dataclass per packet type
+
 
 @dataclass
-class ParsedFrame:
-    """Result of parsing an incoming frame."""
+class ImageRequest:
+    """Parsed 0x02 image request from display."""
 
-    packet_id: int = 0
-
-    # 0x02 image request fields
+    packet_id: int = PKT_IMAGE_REQUEST
     battery_percent: int = 0
     rssi: int = 0
 
-    # 0x01 announcement fields
+
+@dataclass
+class DisplayAnnouncement:
+    """Parsed 0x01 display announcement."""
+
+    packet_id: int = PKT_DISPLAY_ANNOUNCEMENT
     width: int = 0
     height: int = 0
     colour_scheme: int = 0
@@ -117,11 +121,34 @@ class ParsedFrame:
     max_compressed_size: int = 0
     rotation: int = 0
 
-    # 0x82 new image fields
+
+@dataclass
+class NoImageResponse:
+    """Parsed 0x81 no-image response."""
+
+    packet_id: int = PKT_NO_IMAGE
+    poll_interval: int = 0
+
+
+@dataclass
+class NewImageResponse:
+    """Parsed 0x82 new-image response."""
+
+    packet_id: int = PKT_NEW_IMAGE
+    image_length: int = 0
     image_data: bytes = field(default_factory=bytes)
     poll_interval: int = 0
     refresh_type: int = 0
-    image_length: int = 0
+
+
+@dataclass
+class ConfigRequest:
+    """Parsed 0x83 config request."""
+
+    packet_id: int = PKT_REQUEST_CONFIG
+
+
+ParsedFrame = ImageRequest | DisplayAnnouncement | NoImageResponse | NewImageResponse | ConfigRequest
 
 
 def parse_frame(data: bytes) -> ParsedFrame | None:
@@ -155,19 +182,20 @@ def parse_frame(data: bytes) -> ParsedFrame | None:
     packet_id = data[offset]
     offset += 1
 
-    result = ParsedFrame(packet_id=packet_id)
-
     if packet_id == PKT_IMAGE_REQUEST:
         if offset + 2 > packets_end:
             return None
+        result = ImageRequest(packet_id=packet_id)
         result.battery_percent = data[offset]
         result.rssi = data[offset + 1]
         if result.rssi > 127:
             result.rssi -= 256  # signed byte
+        return result
 
     elif packet_id == PKT_DISPLAY_ANNOUNCEMENT:
         if offset + 16 > packets_end:
             return None
+        result = DisplayAnnouncement(packet_id=packet_id)
         (
             result.width,
             result.height,
@@ -184,15 +212,19 @@ def parse_frame(data: bytes) -> ParsedFrame | None:
         ) = struct.unpack_from("<HHHHH", data, offset)
         offset += 10
         result.rotation = data[offset]
+        return result
 
     elif packet_id == PKT_NO_IMAGE:
         if offset + 4 > packets_end:
             return None
+        result = NoImageResponse(packet_id=packet_id)
         result.poll_interval = struct.unpack_from("<I", data, offset)[0]
+        return result
 
     elif packet_id == PKT_NEW_IMAGE:
         if offset + 9 > packets_end:
             return None
+        result = NewImageResponse(packet_id=packet_id)
         result.image_length = struct.unpack_from("<I", data, offset)[0]
         offset += 4
         result.poll_interval = struct.unpack_from("<I", data, offset)[0]
@@ -202,11 +234,10 @@ def parse_frame(data: bytes) -> ParsedFrame | None:
         if offset + result.image_length > packets_end:
             return None
         result.image_data = data[offset : offset + result.image_length]
+        return result
 
     elif packet_id == PKT_REQUEST_CONFIG:
-        pass
+        return ConfigRequest(packet_id=packet_id)
 
     else:
         return None
-
-    return result
