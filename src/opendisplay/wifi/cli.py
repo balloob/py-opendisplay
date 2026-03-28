@@ -103,16 +103,17 @@ def _make_image_provider(
                 logging.exception("Failed to fetch %s", source)
                 return None
 
-            source_hash = hashlib.sha256(raw).hexdigest()[:16]
+            # Hash decoded pixels, not raw bytes (PNG encoding can vary)
+            img = Image.open(io.BytesIO(raw))
+            pixel_hash = hashlib.sha256(img.tobytes()).hexdigest()[:16]
 
-            if last_hash.get(key) == source_hash:
-                logging.debug("Image unchanged (hash %s)", source_hash)
+            if last_hash.get(key) == pixel_hash:
+                logging.info("Image unchanged (hash %s)", pixel_hash)
                 return None
 
-            logging.info("New image (hash %s), converting to %dx%d 1bpp...", source_hash, width, height)
-            img = Image.open(io.BytesIO(raw))
+            logging.info("New image (hash %s), converting to %dx%d 1bpp...", pixel_hash, width, height)
             data = image_to_1bpp(img, width, height)
-            last_hash[key] = source_hash
+            last_hash[key] = pixel_hash
             logging.info("Image encoded: %d bytes", len(data))
             return data
 
