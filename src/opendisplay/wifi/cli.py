@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
-import io
 import logging
+from collections.abc import Callable
+from typing import cast
 from urllib.request import urlopen
 
 from PIL import Image
@@ -28,15 +28,14 @@ def _is_url(source: str) -> bool:
 
 def _make_image_provider(
     source: str | None, checkerboard: bool
-) -> callable:
+) -> Callable[[DisplayAnnouncement | None], bytes | None]:
     """Create an image_provider.
 
     For local files: converts once per resolution, caches the result.
-    For URLs: fetches each time, re-converts if pixels changed.
+    For URLs: fetches and returns raw content each time.
     The server handles deduplication per connection via hashing.
     """
     cache: dict[tuple[int, int], bytes] = {}
-    url_pixel_hash: dict[tuple[int, int], str] = {}
 
     def provider(announcement: DisplayAnnouncement | None) -> bytes | None:
         if announcement is None:
@@ -58,26 +57,10 @@ def _make_image_provider(
         if _is_url(source):
             logging.info("Fetching %s", source)
             try:
-                raw = urlopen(source, timeout=30).read()
+                return cast(bytes, urlopen(source, timeout=30).read())
             except Exception:
                 logging.exception("Failed to fetch %s", source)
-                # Return cached version if available
-                return cache.get(key)
-
-            # Hash decoded pixels to detect changes (PNG encoding can vary)
-            img = Image.open(io.BytesIO(raw))
-            pixel_hash = hashlib.sha256(img.tobytes()).hexdigest()[:16]
-
-            if url_pixel_hash.get(key) == pixel_hash:
-                logging.info("Image unchanged (hash %s)", pixel_hash)
-                return cache.get(key)
-
-            logging.info("New image (hash %s), converting to %dx%d 1bpp...", pixel_hash, width, height)
-            data = image_to_1bpp(img, width, height)
-            cache[key] = data
-            url_pixel_hash[key] = pixel_hash
-            logging.info("Image encoded: %d bytes", len(data))
-            return data
+                return None
 
         else:
             if key not in cache:
